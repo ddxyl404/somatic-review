@@ -2,7 +2,7 @@
  * Build a self-contained Swiss static site into docs/ for GitHub Pages.
  * Run: node --experimental-strip-types --no-warnings scripts/build-pages.ts
  */
-import { mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync, cpSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -21,6 +21,7 @@ import {
   STRUCTURE_TEMPLATE,
 } from "../src/data/corpus.ts";
 import { PAPER_ESSAYS } from "../src/data/essays.ts";
+import { FIGURES } from "../src/data/figures.ts";
 import {
   ANGLES_COPY,
   ATLAS_COPY,
@@ -42,9 +43,22 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "docs");
 mkdirSync(outDir, { recursive: true });
 
+const figures = Object.fromEntries(
+  Object.entries(FIGURES).map(([pid, sections]) => [
+    pid,
+    Object.fromEntries(
+      Object.entries(sections).map(([n, figs]) => [
+        n,
+        figs.map((f) => ({ ...f, src: f.src.replace(/^\//, "./") })),
+      ]),
+    ),
+  ]),
+);
+
 const DATA = {
   papers: PAPERS,
   essays: PAPER_ESSAYS,
+  figures,
   kindLabel: KIND_LABEL,
   metrics: METRICS,
   angles: ANGLES,
@@ -155,6 +169,18 @@ footer .b{grid-column:span 12;padding:40px 16px;font-family:"IBM Plex Mono",mono
 .btn.solid:hover{background:var(--accent)}
 .chip{display:inline-block;border:1px solid var(--ink);padding:10px 14px;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin:0 -1px -1px 0}
 .faint{color:var(--faint);font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+.pfig{border:1px solid var(--ink);background:var(--paper);margin:0}
+.pfig + .pfig{border-top:0}
+.pfig-btn{display:block;width:100%;border:0;background:none;padding:0;text-align:left}
+.pfig img{display:block;width:100%;max-height:520px;object-fit:contain;background:var(--paper)}
+.pfig figcaption{border-top:1px solid var(--ink);padding:16px 20px}
+.sfigs{border-top:1px solid var(--ink)}
+.lightbox{position:fixed;inset:0;z-index:80;background:rgba(17,17,17,.92);display:flex;flex-direction:column}
+.lightbox-bar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.2);color:#fff;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase}
+.lightbox-bar button{min-height:44px;min-width:44px;border:1px solid #fff;background:transparent;color:#fff;font-size:18px}
+.lightbox-stage{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:16px}
+.lightbox-stage img{max-width:100%;max-height:calc(100vh - 140px);object-fit:contain}
+.lightbox-cap{padding:12px 16px;border-top:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);font-size:14px;line-height:1.55}
 @media(min-width:768px){
 header .brand{grid-column:span 4;border-bottom:0;border-right:1px solid var(--ink);padding:12px 24px}
 header nav{grid-column:span 8}
@@ -183,7 +209,7 @@ footer .b{grid-column:span 6;padding:40px 40px}
 </head>
 <body>
 <div id="app"></div>
-<script src="./app.js?v=2"></script>
+<script src="./app.js?v=3"></script>
 </body>
 </html>
 `;
@@ -239,16 +265,39 @@ function bars() {
   </div>\`;
 }
 let kind = "all";
+function figCount(id) {
+  const bag = DATA.figures[id];
+  if (!bag) return 0;
+  return Object.values(bag).reduce((n, arr) => n + arr.length, 0);
+}
+function figsFor(id, n) {
+  return (DATA.figures[id] && DATA.figures[id][n]) || [];
+}
+function renderFig(f) {
+  return \`<figure class="pfig">
+    <button type="button" class="pfig-btn" data-src="\${esc(f.src)}" data-label="\${esc(f.label)}" data-caption="\${esc(f.caption)}">
+      <img src="\${esc(f.src)}" alt="\${esc(f.caption)}" loading="lazy"/>
+    </button>
+    <figcaption>
+      <p class="mono" style="margin:0">\${esc(f.label)} <span class="faint">点击放大</span></p>
+      <p class="small" style="margin:8px 0 0">\${esc(f.caption)}</p>
+      <p class="faint" style="margin:12px 0 0">\${esc(f.credit)}</p>
+    </figcaption>
+  </figure>\`;
+}
 function papersList() {
   const list = kind === "all" ? DATA.papers : DATA.papers.filter(p => p.kind === kind);
   const kinds = ["all","method","benchmark","review","critique","precursor"];
   const filters = kinds.map(k => \`<button data-k="\${k}" class="\${k===kind?"on":""}">\${k==="all"?"全部":DATA.kindLabel[k]}</button>\`).join("");
-  const items = list.map(p => \`<a class="paper" href="#/p/\${p.id}">
+  const items = list.map(p => {
+    const n = figCount(p.id);
+    return \`<a class="paper" href="#/p/\${p.id}">
     <div class="y">\${p.year}<em>\${esc(DATA.kindLabel[p.kind])}</em></div>
     <div class="t"><h3>\${p.tool ? esc(p.tool)+"  ·  " : ""}\${esc(p.titleZh)}</h3>
     <p class="small" style="margin:8px 0 0">\${esc(p.oneLiner)}</p>
-    <p class="faint" style="margin:12px 0 0">\${esc(p.short)}  ·  \${esc(p.journal)}</p></div>
-  </a>\`).join("");
+    <p class="faint" style="margin:12px 0 0">\${esc(p.short)}  ·  \${esc(p.journal)}\${n ? "  ·  原图 " + String(n).padStart(2,"0") : ""}</p></div>
+  </a>\`;
+  }).join("");
   return \`<div class="filters">\${filters}</div>\${items}\`;
 }
 function home() {
@@ -340,7 +389,14 @@ function paperPage(id) {
     ["03","比较什么值", e.four.metrics],
     ["04","从何切入", e.four.angle],
   ].map(([n,t,b]) => \`<div class="row"><div class="num" style="font-size:1rem"><p class="mono" style="margin:0">\${n}</p>\${esc(t)}</div><div class="body"><p class="small" style="margin:0">\${esc(b)}</p></div></div>\`).join("") : "";
-  const struct = p.structure.map(s => \`<div class="row"><div class="num">\${s.n}</div><div class="body"><h3 style="margin:0">\${esc(s.title)}</h3><p class="small" style="margin:8px 0 0">\${esc(s.note)}</p></div></div>\`).join("");
+  const struct = p.structure.map(s => {
+    const figs = figsFor(p.id, s.n).map(renderFig).join("");
+    return \`<div>
+      <div class="row"><div class="num">\${s.n}</div><div class="body"><h3 style="margin:0">\${esc(s.title)}</h3><p class="small" style="margin:8px 0 0">\${esc(s.note)}</p></div></div>
+      \${figs ? \`<div class="sfigs">\${figs}</div>\` : ""}
+    </div>\`;
+  }).join("");
+  const nFigs = figCount(p.id);
   const compared = p.comparedTo.map(c => \`<li style="margin:8px 0">\${esc(c)}</li>\`).join("");
   const datasets = p.datasets.map(d => \`<li style="margin:4px 0;color:var(--muted)">\${esc(d)}</li>\`).join("");
   const metrics = p.metricsUsed.map(m => \`<span class="chip">\${esc(m)}</span>\`).join("");
@@ -355,6 +411,7 @@ function paperPage(id) {
       <p class="en" style="margin-top:32px">\${p.year}</p>
       <p class="idx" style="margin-top:12px">\${esc(DATA.kindLabel[p.kind])}</p>
       \${p.tool ? \`<p style="font-family:'Inter Tight',sans-serif;font-size:2.2rem;margin:32px 0 0">\${esc(p.tool)}</p>\` : ""}
+      \${nFigs ? \`<p class="en" style="margin-top:24px">原图 \${String(nFigs).padStart(2,"0")} 张 · 按章节嵌入</p>\` : ""}
     </div>
     <div class="sec-b">
       <h2>\${esc(p.titleZh)}</h2>
@@ -394,6 +451,23 @@ function route() {
     document.querySelectorAll(".filters button").forEach(btn => {
       btn.addEventListener("click", () => { kind = btn.getAttribute("data-k"); route(); const el = document.getElementById("corpus"); if (el) el.scrollIntoView({block:"start"}); });
     });
+  } else {
+    document.querySelectorAll(".pfig-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const src = btn.getAttribute("data-src");
+        const label = btn.getAttribute("data-label") || "";
+        const caption = btn.getAttribute("data-caption") || "";
+        const overlay = document.createElement("div");
+        overlay.className = "lightbox";
+        overlay.innerHTML = \`<div class="lightbox-bar"><span>\${esc(label)}</span><button type="button" aria-label="关闭">×</button></div>
+          <div class="lightbox-stage"><img src="\${esc(src)}" alt="\${esc(caption)}"/></div>
+          <p class="lightbox-cap">\${esc(caption)}</p>\`;
+        const close = () => overlay.remove();
+        overlay.addEventListener("click", (ev) => { if (ev.target === overlay || ev.target.closest(".lightbox-bar button") || ev.target.tagName === "IMG") close(); });
+        document.addEventListener("keydown", function onKey(ev) { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", onKey); } });
+        document.body.appendChild(overlay);
+      });
+    });
   }
   window.scrollTo(0,0);
 }
@@ -407,6 +481,11 @@ writeFileSync(join(outDir, ".nojekyll"), "", "utf8");
 
 const favSrc = join(root, "public", "favicon.svg");
 if (existsSync(favSrc)) copyFileSync(favSrc, join(outDir, "favicon.svg"));
+
+const figSrc = join(root, "public", "figures");
+if (existsSync(figSrc)) {
+  cpSync(figSrc, join(outDir, "figures"), { recursive: true });
+}
 
 console.log("Wrote", join(outDir, "index.html"), "bytes", html.length);
 console.log("Wrote", join(outDir, "app.js"), "bytes", js.length);
