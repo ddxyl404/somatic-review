@@ -183,11 +183,22 @@ footer .b{grid-column:span 6;padding:40px 40px}
 </head>
 <body>
 <div id="app"></div>
-<script>
-const DATA = ${json};
+<script src="./app.js?v=2"></script>
+</body>
+</html>
+`;
+
+const js = `const DATA = ${json};
 const $ = (s) => document.querySelector(s);
 function esc(s) {
-  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&","<":"<",">":">","\\"":""" }[c]));
+  return String(s ?? "").replace(/[&<>"']/g, function (c) {
+    if (c === "&") return "&" + "amp;";
+    if (c === "<") return "&" + "lt;";
+    if (c === ">") return "&" + "gt;";
+    if (c === '"') return "&" + "quot;";
+    if (c === "'") return "&" + "#39;";
+    return c;
+  });
 }
 function header() {
   const nav = [
@@ -388,15 +399,14 @@ function route() {
 }
 window.addEventListener("hashchange", route);
 route();
-</script>
-</body>
-</html>
 `;
 
 writeFileSync(join(outDir, "index.html"), html, "utf8");
+writeFileSync(join(outDir, "app.js"), js, "utf8");
 writeFileSync(join(outDir, ".nojekyll"), "", "utf8");
 
 const favSrc = join(root, "public", "favicon.svg");
 if (existsSync(favSrc)) copyFileSync(favSrc, join(outDir, "favicon.svg"));
 
 console.log("Wrote", join(outDir, "index.html"), "bytes", html.length);
+console.log("Wrote", join(outDir, "app.js"), "bytes", js.length);
